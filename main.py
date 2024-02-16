@@ -7,10 +7,12 @@ scene_distance = 10
 max_scene_distance = 60
 scene_difference = 0.15
 hardware = "-hwaccel nvdec -hwaccel_output_format cuda"
-# vc = "-c:v libx265 -crf 23 -preset veryfast -tune film -profile:v high -level 4.1 -pix_fmt yuv420p"
-# vc = "-c:v libsvtav1 -crf 25 -preset 10 -svtav1-params fast-decode=1 -g 300"
-vc = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
+# hardware = ""
+vc = "-c:v libx265 -crf 20 -preset superfast"
+#vc = "-c:v libsvtav1 -crf 25 -preset 10 -svtav1-params fast-decode=1 -g 300"
+#vc = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
 vf = """-vf "hwdownload,format=nv12" """
+# vf = ""
 # ac = "-c:a aac -b:a 192k -ac 2 -ar 44100"
 ac = "-c:a libopus -b:a 96k -ac 2"
 
@@ -135,7 +137,7 @@ def make_trailer(video, music):
     print(f"Result file: {trailer_file}")
 
     # concatenate all scenes into one file and mux it with the music file
-    ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" -filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.005:ratio=18:attack=500:release=3000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" -map 0:v {vc} -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
+    ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" -filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.005:ratio=18:attack=500:release=3000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" -map 0:v -c:v copy -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
     print(ffmpeg_mux)
     os.system(f"{ffmpeg_mux}")
 
@@ -163,21 +165,37 @@ def getMediaDuration(media_file):
 
 
 def cut_by_timestamp(music_duration, timestamps, tmp_dir, video):
-    total_duration = music_duration
+    remaining_duration = music_duration
+    total_segments = len(timestamps)
+    default_duration = music_duration / total_segments
     scenes = []
-    for i in range(1, len(timestamps), 1):
-        segment_duration = (int)(total_duration * 1000 / (len(timestamps) - i + 1))
+    last_position = timestamps[0]
+    for i in range(1, total_segments, 1):
+
+        segment_duration = remaining_duration * 0.8 / (total_segments - i + 1)
+
+        if segment_duration < (default_duration / 2):
+            last_position = timestamps[i]
+            continue
+        if (last_position + segment_duration) > timestamps[i]:
+            last_position = timestamps[i]
+            continue
+
         start = format_time(timestamps[i])
-        duration = format_time(segment_duration / 1000)
         print(f"start: {start}, duration: {segment_duration}")
-        output_file = os.path.join(tmp_dir, f"scene_{i:04d}.mkv")
+        duration = format_time(segment_duration)
+        output_file = os.path.join(tmp_dir, f"scene_{i:04d}.ts")
+        # ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} {vf} -map 0:v {vc} -map 0:a  -c:a copy {output_file}"""
         ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} -map 0:v -map 0:a -c:v copy -avoid_negative_ts 1 -c:a copy {output_file}"""
         print(ffmpeg_cut)
         os.system(f"{ffmpeg_cut}")
-        scenes.append(output_file)
+
         real_duration = getMediaDuration(output_file)
-        total_duration = total_duration - real_duration
+        last_position = timestamps[i] + real_duration
+        remaining_duration = remaining_duration - real_duration
         print(f"Real duration of {output_file}: {real_duration}")
+        scenes.append(output_file)
+
     return scenes
 
 

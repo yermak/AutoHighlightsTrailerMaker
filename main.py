@@ -8,9 +8,9 @@ max_scene_distance = 60
 scene_difference = 0.15
 hardware = "-hwaccel nvdec -hwaccel_output_format cuda"
 # hardware = ""
-vc = "-c:v libx265 -crf 20 -preset superfast"
-#vc = "-c:v libsvtav1 -crf 25 -preset 10 -svtav1-params fast-decode=1 -g 300"
-#vc = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
+vc = "-c:v libx265 -crf 17 -preset superfast"
+# vc = "-c:v libsvtav1 -crf 25 -preset 10 -svtav1-params fast-decode=1 -g 300"
+vc_final = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
 vf = """-vf "hwdownload,format=nv12" """
 # vf = ""
 # ac = "-c:a aac -b:a 192k -ac 2 -ar 44100"
@@ -91,7 +91,7 @@ def write_file(list_file, scenes):
             file.write(f"file '{scene}'\n")
 
 
-def make_trailer(video, music):
+def make_trailer(video, music, skip):
     # run ffprobe to get the duration of the music file into the variable, reading directly from the output
     # ffprobe -i "input.mp3" -show_entries format=duration -v quiet -of csv="p=0"
     music_duration = getMediaDuration(music)
@@ -120,7 +120,7 @@ def make_trailer(video, music):
     # generate random number from 5 to 10
     random.seed()
 
-    scenes = cut_by_timestamp(music_duration, timestamps, tmp_dir, video)
+    scenes = cut_by_timestamp(music_duration, timestamps, tmp_dir, video, skip)
     # cut_by_frame(scenes, segment, pts, tmp_dir, video, video_fps)
 
     list_file = os.path.join(tmp_dir, 'list.txt')
@@ -137,7 +137,7 @@ def make_trailer(video, music):
     print(f"Result file: {trailer_file}")
 
     # concatenate all scenes into one file and mux it with the music file
-    ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" -filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.005:ratio=18:attack=500:release=3000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" -map 0:v -c:v copy -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
+    ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" -filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.005:ratio=18:attack=500:release=3000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" -map 0:v {vc_final} -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
     print(ffmpeg_mux)
     os.system(f"{ffmpeg_mux}")
 
@@ -147,6 +147,8 @@ def make_trailer(video, music):
 
 
 def detectScenes(time_file, video):
+    if skip != 0:
+        skip_time = format_time(skip)
     ffmpeg_scenes = f"""ffmpeg.exe -i "{video}" -filter:v "select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
     print(ffmpeg_scenes)
     # measure time of execution
@@ -164,16 +166,18 @@ def getMediaDuration(media_file):
     return music_duration
 
 
-def cut_by_timestamp(music_duration, timestamps, tmp_dir, video):
+def cut_by_timestamp(music_duration, timestamps, tmp_dir, video, skip):
     remaining_duration = music_duration
     total_segments = len(timestamps)
     default_duration = music_duration / total_segments
     scenes = []
     last_position = timestamps[0]
     for i in range(1, total_segments, 1):
-
         segment_duration = remaining_duration * 0.8 / (total_segments - i + 1)
 
+        if timestamps[i] < skip:
+            last_position = timestamps[i]
+            continue
         if segment_duration < (default_duration / 2):
             last_position = timestamps[i]
             continue
@@ -206,17 +210,20 @@ if __name__ == '__main__':
                   ".mpg", ".mpeg", ".flv", ".webm", ".vob",
                   ".qt", ".swf", ".avchd", ".m4v", ".3gp",
                   ".3g2", ".mxf", ".ts", ".m2ts", ".m2t", ".mts", ".m2ts"}
-    if len(sys.argv) != 3:
-        print("Usage: ", sys.argv[0], " <video file>", "<music file>")
+    if len(sys.argv) < 2:
+        print("Usage: ", sys.argv[0], " <video file>", "<music file> (optional)", "<skip seconds> (optional)")
         sys.exit(1)
 
     video = sys.argv[1]
-    music = sys.argv[2]
+    if len(sys.argv) > 2:
+        music = sys.argv[2]
+    if len(sys.argv) > 3:
+        skip = (int)(sys.argv[3])
 
     # Go through the list and print the file name and size
     # files = collect_files(directory, extensions)
 
     # for file in files:
-    make_trailer(video, music)
+    make_trailer(video, music, skip)
 
     # print_files(files)

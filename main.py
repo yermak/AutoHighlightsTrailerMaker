@@ -2,6 +2,7 @@ import os
 import sys
 import random
 import time
+import shutil
 
 scene_distance = 10
 max_scene_distance = 60
@@ -55,15 +56,15 @@ def mk_tmp_dir(file):
                             .replace("/", "_")
                             .replace("'", ""))
                )
-    # tmp_dir exist remove all contents of it and recreate it
-    if os.path.exists(tmp_dir):
-        for root, dirs, files in os.walk(tmp_dir):
-            for file in files:
-                os.remove(os.path.join(root, file))
-            for dir in dirs:
-                os.rmdir(os.path.join(root, dir))
-    else:
+    if not os.path.exists(tmp_dir):
         os.mkdir(tmp_dir)
+    # tmp_dir exist remove all contents of it and recreate it
+    # else:
+    #     for root, dirs, files in os.walk(tmp_dir):
+    #         for file in files:
+    #             os.remove(os.path.join(root, file))
+    #         for dir in dirs:
+    #             os.rmdir(os.path.join(root, dir))
     print(tmp_dir)
     return tmp_dir
 
@@ -107,8 +108,6 @@ def make_trailer(video, music, skip):
     # video_fps = os.popen(ffprobe_video).read().split("/")
     # print("Video FPS:", video_fps)
 
-    # call ffmpeg with the file as input and store the result in the tmp directory
-    tmp_dir = mk_tmp_dir(video)
 
     # escape backslashes in the file path (for windows) and filters (for ffmpeg)
     time_file = os.path.join(tmp_dir, 'time.txt')
@@ -229,15 +228,23 @@ if __name__ == '__main__':
         sys.exit(1)
 
     video = sys.argv[1]
+    music = ""
+    skip = 0
     if len(sys.argv) > 2:
         music = sys.argv[2]
     if len(sys.argv) > 3:
         skip = (int)(sys.argv[3])
 
+
     # Go through the list and print the file name and size
     # files = collect_files(directory, extensions)
 
-    # for file in files:
-    make_trailer(video, music, skip)
 
-    # print_files(files)
+    # call ffmpeg with the file as input and store the result in the tmp directory
+    tmp_dir = mk_tmp_dir(video)
+
+    # catch any exceptions and clean-up temp directory
+    try:
+        make_trailer(video, music, skip)
+    finally:
+        shutil.rmtree(tmp_dir)

@@ -108,7 +108,6 @@ def make_trailer(video, music, skip):
     # video_fps = os.popen(ffprobe_video).read().split("/")
     # print("Video FPS:", video_fps)
 
-
     # escape backslashes in the file path (for windows) and filters (for ffmpeg)
     time_file = os.path.join(tmp_dir, 'time.txt')
     time_file_fixed = time_file.replace('\\', '\\\\').replace(':', '\\:')
@@ -132,7 +131,7 @@ def make_trailer(video, music, skip):
     print(f"Result file: {result_file}")
 
     # concatenate all scenes into one file and mux it with the music file
-    ffmpeg_concat = f"""ffmpeg.exe -f concat -safe 0 -i "{list_file}" -c:v copy -c:a copy "{result_file}" """
+    ffmpeg_concat = f"""ffmpeg.exe -f concat -safe 0 -i "{list_file}" -c:v copy -c:a copy "{result_file}" -y"""
     print(ffmpeg_concat)
 
     if os.system(ffmpeg_concat) != 0:
@@ -201,7 +200,7 @@ def cut_by_timestamp(music_duration, timestamps, tmp_dir, video, skip):
         duration = format_time(segment_duration)
         output_file = os.path.join(tmp_dir, f"scene_{i:04d}.ts")
         # ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} {vf} -map 0:v {vc} -map 0:a  -c:a copy {output_file}"""
-        ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} -map 0:v -map 0:a -c:v copy -avoid_negative_ts 1 -c:a copy "{output_file}" """
+        ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} -map 0:v -map 0:a -c:v copy -avoid_negative_ts 1 -c:a copy "{output_file}" -y"""
         print(ffmpeg_cut)
         if os.system(ffmpeg_cut) != 0:
             print(f"Error in ffmpeg command:\n {ffmpeg_cut}")
@@ -219,15 +218,20 @@ def cut_by_timestamp(music_duration, timestamps, tmp_dir, video, skip):
 # Accept directory as parameter and collect all files in the directory into list with extension stored in array of strings
 if __name__ == '__main__':
     # Get the directory name from the command line
-    extensions = {".mp4", ".mkv", ".avi", ".wmv", ".mov",
-                  ".mpg", ".mpeg", ".flv", ".webm", ".vob",
-                  ".qt", ".swf", ".avchd", ".m4v", ".3gp",
-                  ".3g2", ".mxf", ".ts", ".m2ts", ".m2t", ".mts", ".m2ts"}
+    video_extensions = {".mp4", ".mkv", ".avi", ".wmv", ".mov",
+                        ".mpg", ".mpeg", ".flv", ".webm", ".vob",
+                        ".qt", ".swf", ".avchd", ".m4v", ".3gp",
+                        ".3g2", ".mxf", ".ts", ".m2ts", ".m2t", ".mts", ".m2ts"}
+    music_extension = {".mp3", ".flac", ".wav", ".ogg", ".m4a", ".wma", ".aac", ".ac3",
+                       ".aiff", ".alac", ".amr", ".ape",
+                       ".ogg", ".opus", ".ra", ".rm", ".webm"}
+
     if len(sys.argv) < 2:
         print("Usage: ", sys.argv[0], " <video file>", "<music file> (optional)", "<skip seconds> (optional)")
         sys.exit(1)
 
     video = sys.argv[1]
+
     music = ""
     skip = 0
     if len(sys.argv) > 2:
@@ -235,16 +239,33 @@ if __name__ == '__main__':
     if len(sys.argv) > 3:
         skip = (int)(sys.argv[3])
 
+    # check if video is direcotry and collect all files in it
+    if os.path.isdir(video):
+        video_files = collect_files(video, video_extensions)
+    else:
+        video_files = [video]
+
+    if os.path.isdir(music):
+        music_files = collect_files(music, music_extension)
+    else:
+        music_files = [music]
+
+    for i in range(0, len(video_files), 1):
+        video = video_files[i]
+        if len(music_files) > 1:
+            music = music_files[random.randint(0, len(music_files) - 1)]
+        else:
+            music = music_files[0]
+
+        tmp_dir = mk_tmp_dir(video)
+        try:
+            make_trailer(video, music, skip)
+        finally:
+            shutil.rmtree(tmp_dir)
 
     # Go through the list and print the file name and size
     # files = collect_files(directory, extensions)
 
-
     # call ffmpeg with the file as input and store the result in the tmp directory
-    tmp_dir = mk_tmp_dir(video)
 
     # catch any exceptions and clean-up temp directory
-    try:
-        make_trailer(video, music, skip)
-    finally:
-        shutil.rmtree(tmp_dir)

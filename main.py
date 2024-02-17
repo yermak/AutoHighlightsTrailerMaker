@@ -68,16 +68,17 @@ def mk_tmp_dir(file):
 
 
 # read the time.txt file in tmp_dir and collect a list of timestamps for the trailer, time.txt has following format: 1st line: "frame:4    pts:8883875 pts_time:296.129", each 2nd line should be ignored
-def collect_pts_timestamps(tmp_dir):
+def collect_pts_timestamps(tmp_dir, skip):
     timestamps = []
-    pts = []
     with open(f'{tmp_dir}\\time.txt', 'r') as file:
         lines = file.readlines()
         for i in range(0, len(lines), 2):
             # extract timestamp from line and append it to timestamps list
-            pts.append(int(lines[i].split("pts:")[1].split(" ")[0]))
-            timestamps.append(float(lines[i].split("pts_time:")[1]))
-    return pts, timestamps
+            ts = float(lines[i].split("pts_time:")[1])
+            if ts > skip:
+                timestamps.append(ts)
+                # pts.append(int(lines[i].split("pts:")[1].split(" ")[0]))
+    return timestamps
 
 
 # format time in seconds to HH:MM:SS.miliseconds, miliseconds should be rounded to 3 decimal places
@@ -112,9 +113,9 @@ def make_trailer(video, music, skip):
 
     detectScenes(time_file, video)
 
-    pts, timestamps = collect_pts_timestamps(tmp_dir)
+    timestamps = collect_pts_timestamps(tmp_dir, skip)
 
-    print(pts)
+    # print(pts)
     print(timestamps)
 
     # generate random number from 5 to 10
@@ -137,7 +138,7 @@ def make_trailer(video, music, skip):
     print(f"Result file: {trailer_file}")
 
     # concatenate all scenes into one file and mux it with the music file
-    ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" -filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.005:ratio=18:attack=500:release=3000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" -map 0:v {vc_final} -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
+    ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" -filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.006:ratio=19:attack=1000:release=3000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" -map 0:v {vc_final} -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
     print(ffmpeg_mux)
     os.system(f"{ffmpeg_mux}")
 

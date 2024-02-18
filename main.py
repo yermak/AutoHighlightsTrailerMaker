@@ -11,12 +11,13 @@ hardware = "-hwaccel nvdec -hwaccel_output_format cuda"
 # hardware = ""
 vc = "-c:v libx265 -crf 0 -preset superfast"
 # vc = "-c:v libsvtav1 -crf 25 -preset 10 -svtav1-params fast-decode=1 -g 300"
-vc_final = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
+# vc_final = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
+vc_final = "-c:v copy"
 vf = """-vf "hwdownload,format=nv12" """
 # vf = ""
 # ac = "-c:a aac -b:a 192k -ac 2 -ar 44100"
 ac = "-c:a libopus -b:a 96k -ac 2"
-filter_complex = """-filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.006:ratio=19:attack=1000:release=3000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" """
+filter_complex = """-filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.008:ratio=18:attack=1000:release=4000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" """
 
 
 # accept array of strings and print them
@@ -100,7 +101,10 @@ def write_file(list_file, scenes):
 def make_trailer(video, music, skip):
     # run ffprobe to get the duration of the music file into the variable, reading directly from the output
     # ffprobe -i "input.mp3" -show_entries format=duration -v quiet -of csv="p=0"
-    music_duration = get_media_duration(music)
+    if (music == ""):
+        music_duration = 0
+    else:
+        music_duration = get_media_duration(music)
 
     # video_duration = getMediaDuration(video)
 
@@ -142,7 +146,10 @@ def make_trailer(video, music, skip):
     print(f"Result file: {trailer_file}")
 
     # concatenate all scenes into one file and mux it with the music file
-    ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" {filter_complex} -map 0:v {vc_final} -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
+    if music == "":
+        ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" {vc_final} {ac} -movflags +faststart -y "{trailer_file}" """
+    else:
+        ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" {filter_complex} -map 0:v {vc_final} -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
     print(ffmpeg_mux)
     os.system(f"{ffmpeg_mux}")
 
@@ -154,7 +161,8 @@ def make_trailer(video, music, skip):
 def detect_scenes(video, time_file):
     if skip != 0:
         skip_time = format_time(skip)
-    ffmpeg_scenes = f"""ffmpeg.exe -i "{video}" -filter:v "select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
+    # ffmpeg_scenes = f"""ffmpeg.exe -i "{video}" -vf "select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
+    ffmpeg_scenes = f"""ffmpeg.exe {hardware} -i "{video}" -vf "scale_cuda=w=-1:h=720,hwdownload,format=nv12,select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
     print(ffmpeg_scenes)
     # measure time of execution
     start_time = time.time()
@@ -176,10 +184,13 @@ def get_media_duration(media_file):
     return music_duration
 
 
-def cut_by_timestamp(music_duration, timestamps, tmp_dir, video, skip):
-    remaining_duration = music_duration
+def cut_by_timestamp(duration, timestamps, tmp_dir, video, skip):
     total_segments = len(timestamps)
-    default_duration = music_duration / total_segments
+    if duration != 0:
+        remaining_duration = duration
+    else:
+        remaining_duration = timestamps[total_segments - 1] / 10
+    default_duration = duration / total_segments
     scenes = []
     last_position = timestamps[0]
     for i in range(1, total_segments, 1):
@@ -234,8 +245,7 @@ if __name__ == '__main__':
 
     music = ""
     skip = 0
-    if len(sys.argv) > 2:
-        music = sys.argv[2]
+
     if len(sys.argv) > 3:
         skip = (int)(sys.argv[3])
 
@@ -245,14 +255,20 @@ if __name__ == '__main__':
     else:
         video_files = [video]
 
-    if os.path.isdir(music):
-        music_files = collect_files(music, music_extension)
+    if len(sys.argv) > 2:
+        music = sys.argv[2]
+        if os.path.isdir(music):
+            music_files = collect_files(music, music_extension)
+        else:
+            music_files = [music]
     else:
-        music_files = [music]
+        music_files = []
 
     for i in range(0, len(video_files), 1):
         video = video_files[i]
-        if len(music_files) > 1:
+        if len(music_files) == 0:
+            music = ""
+        elif len(music_files) > 1:
             music = music_files[random.randint(0, len(music_files) - 1)]
         else:
             music = music_files[0]
@@ -261,8 +277,8 @@ if __name__ == '__main__':
         try:
             make_trailer(video, music, skip)
         finally:
-            shutil.rmtree(tmp_dir)
-
+            # shutil.rmtree(tmp_dir)
+            pass
     # Go through the list and print the file name and size
     # files = collect_files(directory, extensions)
 

@@ -9,15 +9,15 @@ max_scene_distance = 60
 scene_difference = 0.15
 hardware = "-hwaccel nvdec -hwaccel_output_format cuda"
 # hardware = ""
-vc = "-c:v libx265 -crf 0 -preset superfast"
+vc = "-c:v libx265 -crf 17 -preset superfast"
 # vc = "-c:v libsvtav1 -crf 25 -preset 10 -svtav1-params fast-decode=1 -g 300"
-# vc_final = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
-vc_final = "-c:v copy"
+vc_final = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
+# vc_final = "-c:v copy"
 vf = """-vf "hwdownload,format=nv12" """
 # vf = ""
 # ac = "-c:a aac -b:a 192k -ac 2 -ar 44100"
 ac = "-c:a libopus -b:a 96k -ac 2"
-filter_complex = """-filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.008:ratio=18:attack=1000:release=4000:link=maximum:detection=peak[bg];[bg][mix]amerge[final]" """
+filter_complex = """-filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.01:ratio=17:attack=1000:release=4000:link=maximum[bg];[bg][mix]amerge[final]" """
 
 
 # accept array of strings and print them
@@ -120,6 +120,7 @@ def make_trailer(video, music, skip):
     detect_scenes(video, time_file_fixed)
 
     timestamps = collect_pts_timestamps(time_file, skip)
+    # key_frames = collect_pts_timestamps(time_file + ".key", skip)
 
     # print(pts)
     print(timestamps)
@@ -131,27 +132,34 @@ def make_trailer(video, music, skip):
 
     list_file = os.path.join(tmp_dir, 'list.txt')
     write_file(list_file, scenes)
-    result_file = os.path.join(tmp_dir, f"{os.path.basename(video)}_trailer.mkv")
-    print(f"Result file: {result_file}")
+    concat_file = os.path.join(tmp_dir, f"{os.path.basename(video)}_concat.mkv")
+    print(f"Concat file: {concat_file}")
 
     # concatenate all scenes into one file and mux it with the music file
-    ffmpeg_concat = f"""ffmpeg.exe -f concat -safe 0 -i "{list_file}" -c:v copy -c:a copy "{result_file}" -y"""
+    ffmpeg_concat = f"""ffmpeg.exe -f concat -safe 0 -i "{list_file}" -c:v copy -c:a copy "{concat_file}" -y"""
     print(ffmpeg_concat)
 
     if os.system(ffmpeg_concat) != 0:
         print(f"Error in ffmpeg command, {ffmpeg_concat}")
         exit(1)
 
-    trailer_file = os.path.join(os.path.dirname(video), f"{os.path.basename(video)}_trailer.mkv")
-    print(f"Result file: {trailer_file}")
+    muxed_file = os.path.join(tmp_dir, f"{os.path.basename(video)}_muxed.mkv")
+    print(f"Muxed file: {muxed_file}")
 
     # concatenate all scenes into one file and mux it with the music file
     if music == "":
-        ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" {vc_final} {ac} -movflags +faststart -y "{trailer_file}" """
+        ffmpeg_mux = f"""ffmpeg.exe -i "{concat_file}" {vc_final} {ac} -y "{muxed_file}" """
     else:
-        ffmpeg_mux = f"""ffmpeg.exe -i  "{result_file}" -i "{music}" {filter_complex} -map 0:v {vc_final} -map [final] {ac} -movflags +faststart -y "{trailer_file}" """
+        ffmpeg_mux = f"""ffmpeg.exe -i "{concat_file}" -i "{music}" {filter_complex} -map 0:v {vc_final} -map [final] {ac} -map 0:a {ac} -map 1:a {ac}  -y "{muxed_file}" """
     print(ffmpeg_mux)
     os.system(f"{ffmpeg_mux}")
+
+    trailer_file = os.path.join(os.path.dirname(video), f"{os.path.basename(video)}_trailer.mkv")
+    print(f"Muxed file: {muxed_file}")
+
+    ffmpeg_optimize = f"""ffmpeg.exe -i "{muxed_file}" -c copy -movflags +faststart-y "{trailer_file}" """
+    print(ffmpeg_optimize)
+    os.system(f"{ffmpeg_optimize}")
 
     print(f'trailer created for {video}')
 
@@ -159,10 +167,14 @@ def make_trailer(video, music, skip):
 
 
 def detect_scenes(video, time_file):
-    if skip != 0:
-        skip_time = format_time(skip)
-    # ffmpeg_scenes = f"""ffmpeg.exe -i "{video}" -vf "select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
-    ffmpeg_scenes = f"""ffmpeg.exe {hardware} -i "{video}" -vf "scale_cuda=w=-1:h=720,hwdownload,format=nv12,select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
+    # ffmpeg_key_frames = f"""ffmpeg.exe -i "{video}" -vf "select='eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}.txt'" -fps_mode vfr -f null NULL"""
+    # print(ffmpeg_key_frames)
+    # if os.system(ffmpeg_key_frames) != 0:
+    #     print(f"Error in ffmpeg command:\n {ffmpeg_key_frames}")
+    #     exit(1)
+
+    ffmpeg_scenes = f"""ffmpeg.exe -i "{video}" -vf "select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
+    # ffmpeg_scenes = f"""ffmpeg.exe {hardware} -i "{video}" -vf "scale_cuda=w=-1:h=720,hwdownload,format=nv12,select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
     print(ffmpeg_scenes)
     # measure time of execution
     start_time = time.time()
@@ -206,12 +218,13 @@ def cut_by_timestamp(duration, timestamps, tmp_dir, video, skip):
             last_position = timestamps[i]
             continue
 
-        start = format_time(timestamps[i])
+        start = format_time(timestamps[i] - segment_duration / 2)
         print(f"start: {start}, duration: {segment_duration}")
-        duration = format_time(segment_duration)
+        duration = format_time(segment_duration/2)
         output_file = os.path.join(tmp_dir, f"scene_{i:04d}.ts")
-        # ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} {vf} -map 0:v {vc} -map 0:a  -c:a copy {output_file}"""
-        ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} -map 0:v -map 0:a -c:v copy -avoid_negative_ts 1 -c:a copy "{output_file}" -y"""
+        # ffmpeg_cut = f"""ffmpeg.exe -ss {start} -i "{video}" -t {duration} -map 0:v {vc} -map 0:a  -c:a copy "{output_file}" -y"""
+        # ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} {vf} -map 0:v {vc} -map 0:a  -c:a copy "{output_file}" -y"""
+        ffmpeg_cut = f"""ffmpeg.exe -ss {start} -i "{video}" -t {duration} -map 0:v -map 0:a -c:v copy -avoid_negative_ts 1 -c:a copy "{output_file}" -y"""
         print(ffmpeg_cut)
         if os.system(ffmpeg_cut) != 0:
             print(f"Error in ffmpeg command:\n {ffmpeg_cut}")
@@ -277,8 +290,8 @@ if __name__ == '__main__':
         try:
             make_trailer(video, music, skip)
         finally:
-            # shutil.rmtree(tmp_dir)
-            pass
+            shutil.rmtree(tmp_dir)
+            # pass
     # Go through the list and print the file name and size
     # files = collect_files(directory, extensions)
 

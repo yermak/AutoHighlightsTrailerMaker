@@ -18,7 +18,7 @@ vf = """-vf "hwdownload,format=nv12" """
 # vf = ""
 # ac = "-c:a aac -b:a 192k -ac 2 -ar 44100"
 ac = "-c:a libopus -b:a 96k -ac 2"
-filter_complex = """-filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.01:ratio=17:attack=1000:release=4000:link=maximum[bg];[bg][mix]amerge[final]" """
+filter_complex = """-filter_complex "[0:a]asplit=2[sc][mix];[1:a][sc]sidechaincompress=threshold=0.01:ratio=16:attack=1000:release=4000:link=maximum[bg];[bg][mix]amerge[final]" """
 
 
 # accept array of strings and print them
@@ -105,7 +105,7 @@ def make_trailer(video, music, skip):
     if (music == ""):
         music_duration = 0
     else:
-        music_duration = get_media_duration(music)
+        music_duration = get_media_duration(music, "a:0")
 
     # video_duration = getMediaDuration(video)
 
@@ -161,7 +161,7 @@ def make_trailer(video, music, skip):
     trailer_file = os.path.join(os.path.dirname(video), f"{os.path.basename(video)}_trailer.mkv")
     print(f"Muxed file: {muxed_file}")
 
-    ffmpeg_optimize = f"""ffmpeg.exe -i "{muxed_file}" -map 0:v -map 0:a -c:v copy -c:a copy -movflags +faststart-y "{trailer_file}" """
+    ffmpeg_optimize = f"""ffmpeg.exe -i "{muxed_file}" -map 0:v -map 0:a -c:v copy -c:a copy -shortest -fflags +shortest -max_interleave_delta 100M -movflags +faststart-y "{trailer_file}" """
     print(ffmpeg_optimize)
     os.system(f"{ffmpeg_optimize}")
 
@@ -193,13 +193,13 @@ def detect_scenes(video, time_file):
     print(f"ffmpeg scenes took {time.time() - start_time} seconds")
 
 
-def get_media_duration(media_file):
-    ffprobe = f"""ffprobe.exe -i "{media_file}" -show_entries format=duration -v quiet -of csv="p=0" """
+def get_media_duration(media_file, stream):
+    ffprobe = f"""ffprobe.exe -i "{media_file}" -select_streams {stream} -show_entries stream=duration -v quiet -of csv="p=0" """
     print(ffprobe)
     # read media duration from the output to float
-    music_duration = float(os.popen(ffprobe).read())
-    print(f"Duration of {media_file}: {music_duration}")
-    return music_duration
+    duration = float(os.popen(ffprobe).read().split("\n")[0])
+    print(f"Duration of {media_file}: {duration}")
+    return duration
 
 
 def cut_by_timestamp(duration, timestamps, tmp_dir, video, skip):
@@ -212,7 +212,10 @@ def cut_by_timestamp(duration, timestamps, tmp_dir, video, skip):
     scenes = []
     last_position = timestamps[0]
     for i in range(1, total_segments, 1):
-        segment_duration = remaining_duration * 0.8 / (total_segments - i + 1)
+        if (i == total_segments - 1):
+            segment_duration = remaining_duration
+        else:
+            segment_duration = remaining_duration * 0.8 / (total_segments - i + 1)
 
         if timestamps[i] < skip:
             last_position = timestamps[i]
@@ -235,7 +238,7 @@ def cut_by_timestamp(duration, timestamps, tmp_dir, video, skip):
             print(f"Error in ffmpeg command:\n {ffmpeg_cut}")
             exit(1)
 
-        real_duration = get_media_duration(output_file)
+        real_duration = get_media_duration(output_file, "v:0")
         last_position = timestamps[i] + real_duration
         remaining_duration = remaining_duration - real_duration
         print(f"Real duration of {output_file}: {real_duration}")
@@ -295,8 +298,8 @@ if __name__ == '__main__':
         try:
             make_trailer(video, music, skip)
         finally:
-            # shutil.rmtree(tmp_dir)
-            pass
+            shutil.rmtree(tmp_dir)
+            # pass
     # Go through the list and print the file name and size
     # files = collect_files(directory, extensions)
 

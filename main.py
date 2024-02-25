@@ -9,7 +9,8 @@ max_scene_distance = 60
 scene_difference = 0.15
 hardware = "-hwaccel nvdec -hwaccel_output_format cuda"
 # hardware = ""
-vc = "-c:v libx265 -crf 17 -preset superfast"
+vc = "-c:v copy -avoid_negative_ts 1"
+# vc = "-c:v libx265 -crf 17 -preset superfast"
 # vc = "-c:v libsvtav1 -crf 25 -preset 10 -svtav1-params fast-decode=1 -g 300"
 vc_final = "-c:v hevc_nvenc -profile:v main10 -pix_fmt p010le -rc:v vbr -tune hq -preset p5 -multipass 2 -bf 4 -b_ref_mode 1 -nonref_p 1 -rc-lookahead 75 -spatial-aq 1 -aq-strength 8 -temporal-aq 1 -cq 25 -qmin 23 -qmax 30 -b:v 1M -maxrate:v 3M"
 # vc_final = "-c:v copy"
@@ -117,7 +118,10 @@ def make_trailer(video, music, skip):
     time_file_fixed = time_file.replace('\\', '\\\\').replace(':', '\\:')
 
     print("Time file:", time_file_fixed)
-    detect_scenes(video, time_file_fixed)
+    if not os.path.exists(time_file) or os.path.getsize(time_file) == 0:
+        detect_scenes(video, time_file_fixed)
+    else:
+        print(f"Scenes already detected in {video}")
 
     timestamps = collect_pts_timestamps(time_file, skip)
     # key_frames = collect_pts_timestamps(time_file + ".key", skip)
@@ -157,7 +161,7 @@ def make_trailer(video, music, skip):
     trailer_file = os.path.join(os.path.dirname(video), f"{os.path.basename(video)}_trailer.mkv")
     print(f"Muxed file: {muxed_file}")
 
-    ffmpeg_optimize = f"""ffmpeg.exe -i "{muxed_file}" -c copy -movflags +faststart-y "{trailer_file}" """
+    ffmpeg_optimize = f"""ffmpeg.exe -i "{muxed_file}" -map 0:v -map 0:a -c:v copy -c:a copy -movflags +faststart-y "{trailer_file}" """
     print(ffmpeg_optimize)
     os.system(f"{ffmpeg_optimize}")
 
@@ -172,6 +176,8 @@ def detect_scenes(video, time_file):
     # if os.system(ffmpeg_key_frames) != 0:
     #     print(f"Error in ffmpeg command:\n {ffmpeg_key_frames}")
     #     exit(1)
+
+
 
     ffmpeg_scenes = f"""ffmpeg.exe -i "{video}" -vf "select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
     # ffmpeg_scenes = f"""ffmpeg.exe {hardware} -i "{video}" -vf "scale_cuda=w=-1:h=720,hwdownload,format=nv12,select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{max_scene_distance})*eq(pict_type\\,PICT_TYPE_I)+gte(t-prev_selected_t\\,{scene_distance})*gt(scene,{scene_difference})*eq(pict_type\\,PICT_TYPE_I)',showinfo,metadata=print:file='{time_file}'" -fps_mode vfr -f null NULL"""
@@ -202,7 +208,7 @@ def cut_by_timestamp(duration, timestamps, tmp_dir, video, skip):
         remaining_duration = duration
     else:
         remaining_duration = timestamps[total_segments - 1] / 10
-    default_duration = duration / total_segments
+    default_duration = remaining_duration / total_segments
     scenes = []
     last_position = timestamps[0]
     for i in range(1, total_segments, 1):
@@ -218,13 +224,12 @@ def cut_by_timestamp(duration, timestamps, tmp_dir, video, skip):
             last_position = timestamps[i]
             continue
 
-        start = format_time(timestamps[i] - segment_duration / 2)
+        start = format_time(timestamps[i])
         print(f"start: {start}, duration: {segment_duration}")
-        duration = format_time(segment_duration/2)
         output_file = os.path.join(tmp_dir, f"scene_{i:04d}.ts")
         # ffmpeg_cut = f"""ffmpeg.exe -ss {start} -i "{video}" -t {duration} -map 0:v {vc} -map 0:a  -c:a copy "{output_file}" -y"""
         # ffmpeg_cut = f"""ffmpeg.exe {hardware} -ss {start} -i "{video}" -t {duration} {vf} -map 0:v {vc} -map 0:a  -c:a copy "{output_file}" -y"""
-        ffmpeg_cut = f"""ffmpeg.exe -ss {start} -i "{video}" -t {duration} -map 0:v -map 0:a -c:v copy -avoid_negative_ts 1 -c:a copy "{output_file}" -y"""
+        ffmpeg_cut = f"""ffmpeg.exe -ss {start} -i "{video}" -t {format_time(segment_duration)} -map 0:v -map 0:a {vc} -c:a copy "{output_file}" -y"""
         print(ffmpeg_cut)
         if os.system(ffmpeg_cut) != 0:
             print(f"Error in ffmpeg command:\n {ffmpeg_cut}")
@@ -290,8 +295,8 @@ if __name__ == '__main__':
         try:
             make_trailer(video, music, skip)
         finally:
-            shutil.rmtree(tmp_dir)
-            # pass
+            # shutil.rmtree(tmp_dir)
+            pass
     # Go through the list and print the file name and size
     # files = collect_files(directory, extensions)
 
